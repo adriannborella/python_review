@@ -1,0 +1,857 @@
+<!-- ================================ -->
+<!-- AJAX TEMPLATES - EJERCICIO DÍA 40 -->
+<!-- ================================ -->
+
+<!-- ===== AJAX ARTICLE CARDS (templates/articles/ajax/article_cards.html) ===== -->
+{% load article_extras %}
+
+<div class="row" id="articles-container">
+    {% for article in page_obj %}
+        <div class="col-md-6 mb-4 article-item" data-article-id="{{ article.id }}">
+            <div class="card article-card h-100">
+                {% if article.featured_image %}
+                    <img src="{{ article.featured_image.url }}" class="card-img-top" style="height: 200px; object-fit: cover;">
+                {% else %}
+                    <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height: 200px;">
+                        <i class="fas fa-image fa-3x text-muted"></i>
+                    </div>
+                {% endif %}
+                
+                <div class="card-body d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <span class="badge bg-secondary">{{ article.category.name }}</span>
+                        <span class="status-badge" data-status="{{ article.status }}">
+                            {% article_status_badge article.status %}
+                        </span>
+                    </div>
+                    
+                    <h5 class="card-title">
+                        <a href="{{ article.get_absolute_url }}" class="text-decoration-none article-title">
+                            {% if query %}
+                                {{ article.title|highlight_search:query }}
+                            {% else %}
+                                {{ article.title }}
+                            {% endif %}
+                        </a>
+                    </h5>
+                    
+                    <p class="card-text flex-grow-1">
+                        {% if query %}
+                            {{ article.content|truncate_words_html:30|highlight_search:query }}
+                        {% else %}
+                            {{ article.content|truncate_words_html:30 }}
+                        {% endif %}
+                    </p>
+                    
+                    <div class="mt-auto">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">
+                                <i class="fas fa-user"></i> {{ article.author.username }}
+                            </small>
+                            <small class="reading-time">
+                                <i class="fas fa-clock"></i> {{ article.content|reading_time }}
+                            </small>
+                        </div>
+                        
+                        <div class="mt-2">
+                            {% for tag in article.get_tags_list %}
+                                <span class="tag">
+                                    {% if query %}
+                                        {{ tag|highlight_search:query }}
+                                    {% else %}
+                                        {{ tag }}
+                                    {% endif %}
+                                </span>
+                            {% endfor %}
+                        </div>
+                        
+                        {% if user == article.author %}
+                            <div class="mt-3">
+                                <a href="{% url 'article_update' article.slug %}" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-edit"></i> Edit
+                                </a>
+                                <button class="btn btn-sm btn-outline-warning toggle-status-btn" 
+                                        data-slug="{{ article.slug }}" 
+                                        data-current-status="{{ article.status }}">
+                                    <i class="fas fa-sync"></i> Toggle Status
+                                </button>
+                                <a href="{% url 'article_delete' article.slug %}" class="btn btn-sm btn-outline-danger">
+                                    <i class="fas fa-trash"></i> Delete
+                                </a>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% empty %}
+        <div class="col-12">
+            <div class="text-center py-5" id="no-results">
+                <i class="fas fa-search fa-4x text-muted mb-3"></i>
+                <h3 class="text-muted">No articles found</h3>
+                <p class="text-muted">
+                    {% if query %}
+                        No results found for "<strong>{{ query }}</strong>". Try different keywords.
+                    {% else %}
+                        No articles match your current filters.
+                    {% endif %}
+                </p>
+                <button class="btn btn-outline-primary" onclick="clearFilters()">
+                    <i class="fas fa-times"></i> Clear Filters
+                </button>
+            </div>
+        </div>
+    {% endfor %}
+</div>
+
+<!-- ===== AJAX PAGINATION (templates/articles/ajax/pagination.html) ===== -->
+{% if page_obj.has_other_pages %}
+    <nav aria-label="Articles pagination" class="mt-4">
+        <ul class="pagination justify-content-center" id="ajax-pagination">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <button class="page-link" data-page="1">First</button>
+                </li>
+                <li class="page-item">
+                    <button class="page-link" data-page="{{ page_obj.previous_page_number }}">Previous</button>
+                </li>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ num }}</span>
+                    </li>
+                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <button class="page-link" data-page="{{ num }}">{{ num }}</button>
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <button class="page-link" data-page="{{ page_obj.next_page_number }}">Next</button>
+                </li>
+                <li class="page-item">
+                    <button class="page-link" data-page="{{ page_obj.paginator.num_pages }}">Last</button>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+{% endif %}
+
+<!-- ===== ENHANCED ARTICLE LIST WITH AJAX (templates/articles/ajax_list.html) ===== -->
+{% extends 'base.html' %}
+{% load article_extras %}
+
+{% block title %}AJAX Articles - Django CRUD{% endblock %}
+
+{% block extra_css %}
+<style>
+    .search-suggestions {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: white;
+        border: 1px solid #ddd;
+        border-top: none;
+        border-radius: 0 0 0.375rem 0.375rem;
+        max-height: 200px;
+        overflow-y: auto;
+        z-index: 1000;
+        display: none;
+    }
+    
+    .suggestion-item {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .suggestion-item:hover,
+    .suggestion-item.active {
+        background-color: #f8f9fa;
+    }
+    
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    
+    .loading-spinner {
+        width: 3rem;
+        height: 3rem;
+    }
+    
+    .article-item {
+        transition: opacity 0.3s ease;
+    }
+    
+    .article-item.loading {
+        opacity: 0.5;
+    }
+    
+    .search-stats {
+        background: #f8f9fa;
+        padding: 10px 15px;
+        border-radius: 0.375rem;
+        margin-bottom: 20px;
+    }
+    
+    mark {
+        background: yellow;
+        padding: 2px 4px;
+        border-radius: 2px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-9">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-newspaper"></i> AJAX Articles</h1>
+            {% if user.is_authenticated %}
+                <a href="{% url 'article_create' %}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> New Article
+                </a>
+            {% endif %}
+        </div>
+
+        <!-- Enhanced Search Form -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form id="ajax-search-form" class="row g-3">
+                    <div class="col-md-4 position-relative">
+                        <div class="input-group">
+                            <input type="text" 
+                                   id="search-input" 
+                                   class="form-control" 
+                                   placeholder="Search articles..." 
+                                   autocomplete="off">
+                            <button type="button" class="btn btn-outline-secondary" id="clear-search">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="search-suggestions" id="search-suggestions"></div>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <select id="category-filter" class="form-select">
+                            <option value="">All Categories</option>
+                            {% for category in all_categories %}
+                                <option value="{{ category.id }}">{{ category.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <select id="status-filter" class="form-select">
+                            <option value="">All Status</option>
+                            <option value="published">Published</option>
+                            <option value="draft">Draft</option>
+                            <option value="archived">Archived</option>
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Search Statistics -->
+        <div id="search-stats" class="search-stats d-none">
+            <div class="d-flex justify-content-between align-items-center">
+                <span id="results-info"></span>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportResults()">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="saveSearch()">
+                        <i class="fas fa-bookmark"></i> Save Search
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="text-center py-4 d-none">
+            <div class="spinner-border loading-spinner text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Searching articles...</div>
+        </div>
+
+        <!-- Articles Container -->
+        <div id="articles-results" class="position-relative">
+            <!-- Initial content will be loaded here -->
+            <div class="row">
+                {% for article in articles %}
+                    <div class="col-md-6 mb-4">
+                        <div class="card article-card h-100">
+                            <!-- Article content here -->
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Pagination Container -->
+        <div id="pagination-container"></div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-lg-3">
+        <!-- Search History -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6><i class="fas fa-history"></i> Recent Searches</h6>
+            </div>
+            <div class="card-body">
+                <ul id="search-history" class="list-unstyled">
+                    <li class="text-muted">No recent searches</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Quick Filters -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6><i class="fas fa-filter"></i> Quick Filters</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary btn-sm quick-filter" data-filter="today">
+                        <i class="fas fa-calendar-day"></i> Today's Articles
+                    </button>
+                    <button class="btn btn-outline-success btn-sm quick-filter" data-filter="popular">
+                        <i class="fas fa-fire"></i> Most Popular
+                    </button>
+                    <button class="btn btn-outline-info btn-sm quick-filter" data-filter="recent">
+                        <i class="fas fa-clock"></i> Recently Updated
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm quick-filter" data-filter="my-articles">
+                        <i class="fas fa-user"></i> My Articles
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Stats -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6><i class="fas fa-chart-bar"></i> Live Stats</h6>
+            </div>
+            <div class="card-body">
+                <div id="live-stats">
+                    <div class="d-flex justify-content-between">
+                        <span>Total Articles:</span>
+                        <span id="total-count">{{ site_stats.total_articles }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Published:</span>
+                        <span id="published-count">-</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Categories:</span>
+                        <span id="categories-count">{{ site_stats.total_categories }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5><i class="fas fa-tags"></i> Categories</h5>
+            </div>
+            <div class="card-body">
+                {% for category in all_categories %}
+                    <button class="badge bg-secondary text-decoration-none me-1 mb-1 category-filter" 
+                            data-category="{{ category.id }}">
+                        {{ category.name }}
+                    </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Popular Tags -->
+        {% show_popular_tags 8 %}
+    </div>
+</div>
+
+<!-- Toast Container for Notifications -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="notification-toast" class="toast hide" role="alert">
+        <div class="toast-header">
+            <i class="fas fa-info-circle text-primary me-2"></i>
+            <strong class="me-auto">Notification</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body">
+            <!-- Dynamic content -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ===== AJAX SEARCH FUNCTIONALITY =====
+class ArticleSearchManager {
+    constructor() {
+        this.searchInput = document.getElementById('search-input');
+        this.categoryFilter = document.getElementById('category-filter');
+        this.statusFilter = document.getElementById('status-filter');
+        this.resultsContainer = document.getElementById('articles-results');
+        this.paginationContainer = document.getElementById('pagination-container');
+        this.loadingIndicator = document.getElementById('loading-indicator');
+        this.searchStats = document.getElementById('search-stats');
+        this.suggestionsContainer = document.getElementById('search-suggestions');
+        
+        this.searchTimeout = null;
+        this.currentRequest = null;
+        this.searchHistory = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+        
+        this.init();
+    }
+    
+    init() {
+        // Event listeners
+        this.searchInput.addEventListener('input', this.handleSearchInput.bind(this));
+        this.searchInput.addEventListener('keydown', this.handleKeyDown.bind(this));
+        this.categoryFilter.addEventListener('change', this.performSearch.bind(this));
+        this.statusFilter.addEventListener('change', this.performSearch.bind(this));
+        
+        // Clear search button
+        document.getElementById('clear-search').addEventListener('click', this.clearSearch.bind(this));
+        
+        // Quick filters
+        document.querySelectorAll('.quick-filter').forEach(btn => {
+            btn.addEventListener('click', this.handleQuickFilter.bind(this));
+        });
+        
+        // Category filter badges
+        document.querySelectorAll('.category-filter').forEach(badge => {
+            badge.addEventListener('click', this.handleCategoryBadge.bind(this));
+        });
+        
+        // Load initial results
+        this.performSearch();
+        this.loadSearchHistory();
+        
+        // Close suggestions when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!this.searchInput.contains(e.target) && !this.suggestionsContainer.contains(e.target)) {
+                this.hideSuggestions();
+            }
+        });
+    }
+    
+    handleSearchInput(e) {
+        clearTimeout(this.searchTimeout);
+        const query = e.target.value.trim();
+        
+        if (query.length >= 2) {
+            // Show suggestions after 300ms delay
+            this.searchTimeout = setTimeout(() => {
+                this.loadSuggestions(query);
+            }, 300);
+        } else {
+            this.hideSuggestions();
+        }
+        
+        // Perform search after 600ms delay
+        this.searchTimeout = setTimeout(() => {
+            this.performSearch();
+        }, 600);
+    }
+    
+    handleKeyDown(e) {
+        const suggestions = this.suggestionsContainer.querySelectorAll('.suggestion-item');
+        const active = this.suggestionsContainer.querySelector('.suggestion-item.active');
+        
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                if (active) {
+                    active.classList.remove('active');
+                    const next = active.nextElementSibling;
+                    if (next) next.classList.add('active');
+                } else if (suggestions.length > 0) {
+                    suggestions[0].classList.add('active');
+                }
+                break;
+                
+            case 'ArrowUp':
+                e.preventDefault();
+                if (active) {
+                    active.classList.remove('active');
+                    const prev = active.previousElementSibling;
+                    if (prev) prev.classList.add('active');
+                }
+                break;
+                
+            case 'Enter':
+                e.preventDefault();
+                if (active) {
+                    this.searchInput.value = active.textContent;
+                    this.hideSuggestions();
+                    this.performSearch();
+                } else {
+                    this.performSearch();
+                }
+                break;
+                
+            case 'Escape':
+                this.hideSuggestions();
+                break;
+        }
+    }
+    
+    async loadSuggestions(query) {
+        try {
+            const response = await fetch(`/ajax/suggestions/?q=${encodeURIComponent(query)}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                this.displaySuggestions(data.suggestions);
+            }
+        } catch (error) {
+            console.error('Error loading suggestions:', error);
+        }
+    }
+    
+    displaySuggestions(suggestions) {
+        if (suggestions.length === 0) {
+            this.hideSuggestions();
+            return;
+        }
+        
+        this.suggestionsContainer.innerHTML = suggestions
+            .map(suggestion => `
+                <div class="suggestion-item" data-suggestion="${suggestion}">
+                    ${suggestion}
+                </div>
+            `).join('');
+        
+        // Add click handlers
+        this.suggestionsContainer.querySelectorAll('.suggestion-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.searchInput.value = item.dataset.suggestion;
+                this.hideSuggestions();
+                this.performSearch();
+            });
+        });
+        
+        this.suggestionsContainer.style.display = 'block';
+    }
+    
+    hideSuggestions() {
+        this.suggestionsContainer.style.display = 'none';
+    }
+    
+    async performSearch(page = 1) {
+        // Cancel previous request
+        if (this.currentRequest) {
+            this.currentRequest.abort();
+        }
+        
+        const query = this.searchInput.value.trim();
+        const category = this.categoryFilter.value;
+        const status = this.statusFilter.value;
+        
+        // Build URL parameters
+        const params = new URLSearchParams();
+        if (query) params.append('q', query);
+        if (category) params.append('category', category);
+        if (status) params.append('status', status);
+        if (page > 1) params.append('page', page);
+        
+        // Show loading
+        this.showLoading();
+        
+        // Save to search history
+        if (query && !this.searchHistory.includes(query)) {
+            this.searchHistory.unshift(query);
+            this.searchHistory = this.searchHistory.slice(0, 5); // Keep only last 5
+            localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
+            this.loadSearchHistory();
+        }
+        
+        try {
+            this.currentRequest = new AbortController();
+            
+            const response = await fetch(`/ajax/search/?${params.toString()}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                signal: this.currentRequest.signal
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                this.displayResults(data);
+                this.updateSearchStats(data);
+                this.updateLiveStats(data);
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Search error:', error);
+                this.showError('Search failed. Please try again.');
+            }
+        } finally {
+            this.hideLoading();
+            this.currentRequest = null;
+        }
+    }
+    
+    displayResults(data) {
+        this.resultsContainer.innerHTML = data.articles_html;
+        this.paginationContainer.innerHTML = data.pagination_html;
+        
+        // Add pagination event listeners
+        this.paginationContainer.querySelectorAll('[data-page]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const page = parseInt(btn.dataset.page);
+                this.performSearch(page);
+                
+                // Scroll to top of results
+                this.resultsContainer.scrollIntoView({ behavior: 'smooth' });
+            });
+        });
+        
+        // Add status toggle handlers
+        this.resultsContainer.querySelectorAll('.toggle-status-btn').forEach(btn => {
+            btn.addEventListener('click', this.handleStatusToggle.bind(this));
+        });
+    }
+    
+    updateSearchStats(data) {
+        if (data.total_results > 0) {
+            document.getElementById('results-info').textContent = 
+                `Found ${data.total_results} articles (Page ${data.current_page} of ${data.total_pages})`;
+            this.searchStats.classList.remove('d-none');
+        } else {
+            this.searchStats.classList.add('d-none');
+        }
+    }
+    
+    updateLiveStats(data) {
+        // Update live statistics based on current results
+        document.getElementById('published-count').textContent = data.total_results;
+    }
+    
+    showLoading() {
+        this.loadingIndicator.classList.remove('d-none');
+        this.resultsContainer.style.opacity = '0.6';
+    }
+    
+    hideLoading() {
+        this.loadingIndicator.classList.add('d-none');
+        this.resultsContainer.style.opacity = '1';
+    }
+    
+    showError(message) {
+        this.showNotification(message, 'error');
+    }
+    
+    showNotification(message, type = 'info') {
+        const toast = document.getElementById('notification-toast');
+        const body = toast.querySelector('.toast-body');
+        const icon = toast.querySelector('i');
+        
+        body.textContent = message;
+        
+        // Update icon based on type
+        icon.className = type === 'error' ? 'fas fa-exclamation-triangle text-danger me-2' : 'fas fa-info-circle text-primary me-2';
+        
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+    }
+    
+    clearSearch() {
+        this.searchInput.value = '';
+        this.categoryFilter.value = '';
+        this.statusFilter.value = '';
+        this.hideSuggestions();
+        this.performSearch();
+    }
+    
+    loadSearchHistory() {
+        const historyContainer = document.getElementById('search-history');
+        
+        if (this.searchHistory.length === 0) {
+            historyContainer.innerHTML = '<li class="text-muted">No recent searches</li>';
+            return;
+        }
+        
+        historyContainer.innerHTML = this.searchHistory
+            .map(term => `
+                <li class="mb-1">
+                    <button class="btn btn-sm btn-link p-0 text-start search-history-item" data-term="${term}">
+                        <i class="fas fa-history text-muted me-1"></i> ${term}
+                    </button>
+                </li>
+            `).join('');
+        
+        // Add click handlers
+        historyContainer.querySelectorAll('.search-history-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.searchInput.value = btn.dataset.term;
+                this.performSearch();
+            });
+        });
+    }
+    
+    handleQuickFilter(e) {
+        const filter = e.target.dataset.filter;
+        
+        // Reset other filters
+        this.searchInput.value = '';
+        this.categoryFilter.value = '';
+        
+        switch(filter) {
+            case 'today':
+                // Implementation for today's articles would require backend support
+                this.statusFilter.value = 'published';
+                break;
+            case 'popular':
+                // Would need popularity sorting in backend
+                this.statusFilter.value = 'published';
+                break;
+            case 'recent':
+                this.statusFilter.value = 'published';
+                break;
+            case 'my-articles':
+                // Would need user filter in backend
+                this.searchInput.value = '{{ user.username }}';
+                break;
+        }
+        
+        this.performSearch();
+    }
+    
+    handleCategoryBadge(e) {
+        const categoryId = e.target.dataset.category;
+        this.categoryFilter.value = categoryId;
+        this.performSearch();
+    }
+    
+    async handleStatusToggle(e) {
+        const button = e.target.closest('.toggle-status-btn');
+        const slug = button.dataset.slug;
+        const currentStatus = button.dataset.currentStatus;
+        
+        // Determine new status
+        const statusCycle = {
+            'draft': 'published',
+            'published': 'archived',
+            'archived': 'draft'
+        };
+        const newStatus = statusCycle[currentStatus];
+        
+        try {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+            
+            const response = await fetch(`/ajax/toggle-status/${slug}/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({ status: newStatus })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Update button
+                button.dataset.currentStatus = data.new_status;
+                button.innerHTML = '<i class="fas fa-sync"></i> Toggle Status';
+                
+                // Update status badge
+                const statusBadge = button.closest('.article-item').querySelector('.status-badge');
+                statusBadge.innerHTML = this.getStatusBadgeHTML(data.new_status);
+                
+                this.showNotification(data.message, 'success');
+                
+            } else {
+                throw new Error('Failed to update status');
+            }
+            
+        } catch (error) {
+            console.error('Status toggle error:', error);
+            this.showError('Failed to update article status');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-sync"></i> Toggle Status';
+        }
+    }
+    
+    getStatusBadgeHTML(status) {
+        const badges = {
+            'published': '<span class="badge bg-success">Published</span>',
+            'draft': '<span class="badge bg-warning">Draft</span>',
+            'archived': '<span class="badge bg-secondary">Archived</span>'
+        };
+        return badges[status] || `<span class="badge bg-light">${status}</span>`;
+    }
+}
+
+// Initialize search manager when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    window.articleSearch = new ArticleSearchManager();
+});
+
+// Utility functions
+function clearFilters() {
+    window.articleSearch.clearSearch();
+}
+
+function exportResults() {
+    // Implementation for exporting search results
+    window.articleSearch.showNotification('Export functionality would be implemented here');
+}
+
+function saveSearch() {
+    // Implementation for saving current search
+    window.articleSearch.showNotification('Search saved to your preferences');
+}
+
+// Performance monitoring
+let searchStartTime;
+document.addEventListener('search-start', () => {
+    searchStartTime = performance.now();
+});
+
+document.addEventListener('search-complete', () => {
+    const duration = performance.now() - searchStartTime;
+    console.log(`Search completed in ${duration.toFixed(2)}ms`);
+});
+</script>
+{% endblock %}
