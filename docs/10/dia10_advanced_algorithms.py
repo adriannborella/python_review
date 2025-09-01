@@ -22,6 +22,7 @@ class AdvancedSearchAlgorithms:
         Tiempo: O(log n), mejor que binary search cuando target está cerca del inicio
 
         Usado en: Google, Microsoft para sistemas de archivos grandes
+        https://www.youtube.com/watch?v=qH4NQKRemZ0
         """
         if not arr:
             return -1
@@ -58,6 +59,7 @@ class AdvancedSearchAlgorithms:
         Tiempo: O(log log n) para distribución uniforme, O(n) worst case
 
         Útil cuando: Los datos están uniformemente distribuidos
+        https://www.youtube.com/shorts/YrWxCdRQk14
         """
         if not arr:
             return -1
@@ -95,6 +97,7 @@ class AdvancedSearchAlgorithms:
         Tiempo: O(log n), Espacio: O(1)
 
         Pregunta frecuente: "Encuentra el máximo en mountain array"
+        https://www.youtube.com/watch?v=o3HPRpbGlbI
         """
         left, right = 0, len(arr) - 1
 
