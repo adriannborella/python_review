@@ -1,43 +1,13 @@
-Hash Set is a data structure that:
-
-Stores unique elements (no duplicates).
-
-Provides fast lookups, insertions, and deletions (average O(1) time).
-
-Uses hashing internally to map values to buckets.
-
-We’ll implement it without using Python’s built-in set, so you can deeply understand how it works.
-
-Implementation Plan
-
-Hash function → use Python’s built-in hash(), but mod with number of buckets.
-
-Buckets → a list of lists (chaining method for collisions).
-
-Operations:
-
-add(value) → Insert if not already present.
-
-remove(value) → Delete if exists.
-
-contains(value) → Check existence.
-
-__len__() → Get number of elements.
-
-__iter__() → Iterate over elements.
-
-
-Implementation
 class HashSet:
     def __init__(self, capacity=16, load_factor=0.75):
-        self.capacity = capacity            # Number of buckets
-        self.load_factor = load_factor      # Resize threshold
-        self.size = 0                       # Number of elements
-        self.buckets = [[] for _ in range(capacity)]
+        self.capacity = capacity  # Number of buckets
+        self.load_factor = load_factor  # Resize threshold
+        self.size = 0  # Number of elements
+        self.buckets = [[] for _ in range(capacity)]  # [[],[],[]]
 
     def _hash(self, key):
         """Compute bucket index for a key."""
-        return hash(key) % self.capacity
+        return hash(key) % self.capacity  # hash("apple") % 16
 
     def _resize(self):
         """Double the capacity and rehash all elements when load factor exceeded."""
@@ -95,7 +65,7 @@ hs.add("apple")
 hs.add("banana")
 hs.add("cherry")
 
-print(hs)          # {apple, banana, cherry}
+print(hs)  # {apple, banana, cherry}
 print("apple" in hs)  # True (uses __iter__)
 
 # Remove an element
@@ -106,15 +76,5 @@ print(hs.contains("banana"))  # False
 for i in range(20):
     hs.add(i)
 
-print(len(hs))     # Size of the set
-print(hs)          # Shows all elements
-
-Key Points You Now Understand
-
-Hashing maps keys to bucket indices.
-
-Collision resolution is handled via chaining (list inside each bucket).
-
-Load factor keeps the set efficient by triggering resize & rehashing.
-
-All core operations are average O(1), but resizing is O(n) occasionally.
+print(len(hs))  # Size of the set
+print(hs)  # Shows all elements
