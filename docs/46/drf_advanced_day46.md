@@ -902,3 +902,484 @@ def get_cache_hit_rate():
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from django.conf import settings
+import re
+from datetime import timedelta
+
+class SecurityAuditor:
+    def __init__(self):
+        self.security_issues = []
+        self.security_logger = logging.getLogger('security')
+    
+    def audit_user_accounts(self):
+        """Audit user account security"""
+        issues = []
+        
+        # Check for weak passwords
+        weak_users = User.objects.filter(
+            password__in=['password', '123456', 'admin']
+        )
+        if weak_users.exists():
+            issues.append(f"Found {weak_users.count()} users with weak passwords")
+        
+        # Check for inactive admin accounts
+        inactive_admins = User.objects.filter(
+            is_staff=True,
+            last_login__lt=timezone.now() - timedelta(days=90)
+        )
+        if inactive_admins.exists():
+            issues.append(f"Found {inactive_admins.count()} inactive admin accounts")
+        
+        # Check for users without email
+        users_no_email = User.objects.filter(email='')
+        if users_no_email.exists():
+            issues.append(f"Found {users_no_email.count()} users without email")
+        
+        return issues
+    
+    def audit_settings_security(self):
+        """Audit Django settings for security issues"""
+        issues = []
+        
+        # Check DEBUG setting
+        if getattr(settings, 'DEBUG', False):
+            issues.append("DEBUG is True in production")
+        
+        # Check SECRET_KEY
+        if getattr(settings, 'SECRET_KEY', '') == 'django-insecure-default':
+            issues.append("Using default SECRET_KEY")
+        
+        # Check ALLOWED_HOSTS
+        allowed_hosts = getattr(settings, 'ALLOWED_HOSTS', [])
+        if '*' in allowed_hosts:
+            issues.append("ALLOWED_HOSTS contains '*' - security risk")
+        
+        # Check SECURE settings
+        security_settings = [
+            'SECURE_SSL_REDIRECT',
+            'SECURE_HSTS_SECONDS',
+            'SESSION_COOKIE_SECURE',
+            'CSRF_COOKIE_SECURE',
+        ]
+        
+        for setting in security_settings:
+            if not getattr(settings, setting, False):
+                issues.append(f"{setting} is not properly configured")
+        
+        return issues
+    
+    def audit_database_permissions(self):
+        """Audit database user permissions"""
+        issues = []
+        
+        # Check for superuser database accounts
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT usename, usesuper, usecreatedb 
+                FROM pg_user 
+                WHERE usesuper = true OR usecreatedb = true
+            """)
+            
+            superusers = cursor.fetchall()
+            if len(superusers) > 1:  # More than just postgres user
+                issues.append(f"Found {len(superusers)} database superusers")
+        
+        return issues
+    
+    def run_full_audit(self):
+        """Run complete security audit"""
+        audit_results = {
+            'user_accounts': self.audit_user_accounts(),
+            'settings': self.audit_settings_security(),
+            'database': self.audit_database_permissions(),
+            'timestamp': timezone.now().isoformat(),
+        }
+        
+        # Log critical issues
+        total_issues = sum(len(issues) for issues in audit_results.values() if isinstance(issues, list))
+        
+        if total_issues > 0:
+            self.security_logger.error(f"Security audit found {total_issues} issues", extra=audit_results)
+        else:
+            self.security_logger.info("Security audit passed - no issues found")
+        
+        return audit_results
+
+# Management command for security audit
+class Command(BaseCommand):
+    help = 'Run security audit'
+    
+    def handle(self, *args, **options):
+        auditor = SecurityAuditor()
+        results = auditor.run_full_audit()
+        
+        self.stdout.write(self.style.SUCCESS('Security Audit Results:'))
+        
+        for category, issues in results.items():
+            if isinstance(issues, list) and issues:
+                self.stdout.write(f"\n{category.upper()} ISSUES:")
+                for issue in issues:
+                    self.stdout.write(f"  ⚠️  {issue}")
+            elif isinstance(issues, list):
+                self.stdout.write(f"\n{category.upper()}: ✅ No issues found")
+        
+        total_issues = sum(len(issues) for issues in results.values() if isinstance(issues, list))
+        
+        if total_issues == 0:
+            self.stdout.write(self.style.SUCCESS('\n🎉 Security audit passed!'))
+        else:
+            self.stdout.write(self.style.ERROR(f'\n❌ Found {total_issues} security issues'))
+```
+
+### 3. Performance Monitoring Dashboard
+
+#### Real-time Performance Tracking
+```python
+# performance_dashboard.py
+from django.shortcuts import render
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse
+import psutil
+import time
+
+@staff_member_required
+def performance_dashboard(request):
+    """Admin dashboard for performance monitoring"""
+    context = {
+        'title': 'Performance Dashboard',
+        'metrics_endpoint': '/admin/api/metrics/',
+    }
+    return render(request, 'admin/performance_dashboard.html', context)
+
+@staff_member_required
+def real_time_metrics(request):
+    """Real-time metrics API for dashboard"""
+    # System metrics
+    cpu_percent = psutil.cpu_percent(interval=1)
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    # Django metrics
+    django_metrics = {
+        'active_connections': len(connection.queries),
+        'cache_stats': get_detailed_cache_stats(),
+        'recent_errors': get_recent_errors(),
+        'slow_queries': get_slow_queries(),
+    }
+    
+    # Application metrics
+    app_metrics = {
+        'active_users': get_active_users_count(),
+        'api_requests_last_hour': get_api_requests_count(),
+        'average_response_time': get_average_response_time(),
+        'error_rate': get_error_rate(),
+    }
+    
+    metrics = {
+        'system': {
+            'cpu_percent': cpu_percent,
+            'memory_percent': memory.percent,
+            'memory_available_gb': round(memory.available / (1024**3), 2),
+            'disk_percent': round((disk.used / disk.total) * 100, 2),
+            'disk_free_gb': round(disk.free / (1024**3), 2),
+        },
+        'django': django_metrics,
+        'application': app_metrics,
+        'timestamp': time.time(),
+    }
+    
+    return JsonResponse(metrics)
+
+def get_detailed_cache_stats():
+    """Get detailed cache statistics"""
+    try:
+        import redis
+        r = redis.Redis.from_url(settings.CACHES['default']['LOCATION'])
+        info = r.info()
+        
+        return {
+            'hits': info.get('keyspace_hits', 0),
+            'misses': info.get('keyspace_misses', 0),
+            'keys': r.dbsize(),
+            'memory_usage_mb': round(info.get('used_memory', 0) / (1024**2), 2),
+            'connected_clients': info.get('connected_clients', 0),
+        }
+    except:
+        return {'error': 'Cannot connect to Redis'}
+
+def get_slow_queries():
+    """Get recent slow queries from logs"""
+    # In production, you'd parse logs or use a monitoring tool
+    return [
+        {
+            'query': 'SELECT * FROM blog_post WHERE...',
+            'duration': 2.3,
+            'timestamp': '2025-08-30T10:30:00Z'
+        }
+    ]
+```
+
+---
+
+## 🧪 EJERCICIOS PRÁCTICOS AVANZADOS
+
+### Ejercicio 1: Performance Regression Detection
+```python
+# Create a system that detects performance regressions
+class PerformanceBaseline:
+    def __init__(self):
+        self.baseline_file = 'performance_baseline.json'
+    
+    def record_baseline(self, endpoint, response_time):
+        """Record performance baseline for endpoint"""
+        # Your implementation here
+        pass
+    
+    def check_regression(self, endpoint, current_time):
+        """Check if current performance is significantly worse than baseline"""
+        # Your implementation here
+        # Alert if performance is >50% worse than baseline
+        pass
+
+# Task: Implement complete regression detection system
+```
+
+### Ejercicio 2: Custom Metrics Collection
+```python
+# Implement custom business metrics
+def track_business_metrics():
+    """Track important business KPIs"""
+    metrics = {
+        'daily_active_users': None,  # Implement
+        'content_engagement_rate': None,  # Implement
+        'api_adoption_rate': None,  # Implement
+        'user_retention_rate': None,  # Implement
+    }
+    
+    # Your task: Implement each metric calculation
+    # Store in time-series database (Redis Streams or InfluxDB)
+    return metrics
+```
+
+### Ejercicio 3: Security Event Response
+```python
+# Implement automated security response
+class SecurityEventHandler:
+    def handle_brute_force_attack(self, ip_address, failed_attempts):
+        """Handle detected brute force attack"""
+        # Your implementation:
+        # 1. Block IP temporarily
+        # 2. Send alert to admins
+        # 3. Log incident
+        # 4. Update monitoring dashboard
+        pass
+    
+    def handle_sql_injection_attempt(self, request_data):
+        """Handle detected SQL injection attempt"""
+        # Your implementation:
+        # 1. Block request immediately
+        # 2. Log full request details
+        # 3. Alert security team
+        # 4. Add IP to watchlist
+        pass
+```
+
+---
+
+## 📋 PRODUCTION READINESS CHECKLIST
+
+### Security Checklist:
+- [ ] **HTTPS Configuration**: SSL certificates, HSTS headers
+- [ ] **Authentication Security**: Strong password policies, 2FA option
+- [ ] **Input Validation**: XSS protection, SQL injection prevention
+- [ ] **Rate Limiting**: API rate limits, brute force protection
+- [ ] **Security Headers**: CSP, X-Frame-Options, etc.
+- [ ] **Dependency Security**: Regular security updates
+- [ ] **Access Control**: Proper permissions, least privilege principle
+
+### Monitoring Checklist:
+- [ ] **Error Tracking**: Sentry integration, alert configuration
+- [ ] **Performance Monitoring**: Response times, query analysis
+- [ ] **Health Checks**: Database, cache, external services
+- [ ] **Business Metrics**: User engagement, API usage
+- [ ] **Alerting**: Critical error alerts, performance thresholds
+- [ ] **Dashboards**: Real-time monitoring interface
+
+### Logging Checklist:
+- [ ] **Structured Logging**: JSON format, consistent fields
+- [ ] **Log Levels**: Appropriate use of DEBUG, INFO, WARNING, ERROR
+- [ ] **Log Rotation**: Size limits, backup retention
+- [ ] **Sensitive Data**: No passwords, tokens in logs
+- [ ] **Correlation IDs**: Request tracking across services
+- [ ] **Performance Logs**: Slow query logging, response times
+
+---
+
+## 🎯 PREGUNTAS DE ENTREVISTA - PRODUCTION
+
+### 1. Monitoring Strategy
+**P:** "¿Cómo monitorearías una aplicación Django en producción?"
+
+**R:** Stack completo:
+1. **Application Monitoring**: Sentry para errors y performance
+2. **Infrastructure Monitoring**: Prometheus + Grafana para métricas de sistema
+3. **Log Aggregation**: ELK stack o similar para centralized logging
+4. **Health Checks**: Automated endpoints para service health
+5. **Alerting**: PagerDuty o similar para critical incidents
+6. **Business Metrics**: Custom dashboards para KPIs
+
+### 2. Security Response
+**P:** "Te reportan un security incident en producción. ¿Cuáles son tus primeros pasos?"
+
+**R:** Incident Response Protocol:
+1. **Assess**: Determinar scope y severity
+2. **Contain**: Block attack vectors, isolate affected systems
+3. **Document**: Log all actions y evidence
+4. **Communicate**: Notify stakeholders apropiadamente
+5. **Investigate**: Root cause analysis
+6. **Remediate**: Fix vulnerabilities, update security measures
+7. **Review**: Post-incident review y prevention measures
+
+### 3. Performance Under Load
+**P:** "Tu API está cayendo bajo high load. ¿Cómo la estabilizarías?"
+
+**R:** Emergency Response:
+1. **Immediate**: Enable aggressive caching, increase timeouts
+2. **Scale Horizontally**: Add more application servers
+3. **Database**: Enable read replicas, connection pooling
+4. **Load Balancing**: Distribute traffic effectively
+5. **Rate Limiting**: Protect against abuse
+6. **Background Tasks**: Move heavy operations to Celery
+7. **Monitor**: Watch metrics closely durante recovery
+
+---
+
+## 📊 PROYECTO FINAL DEL DÍA
+
+### Production Monitoring Stack
+Implementar un sistema completo que incluya:
+
+1. **Real-time Dashboard**: Métricas de sistema y aplicación
+2. **Alert System**: Notificaciones automáticas para issues críticos
+3. **Security Monitoring**: Detection de suspicious activity
+4. **Performance Tracking**: Baseline comparison y regression detection
+5. **Health Check Suite**: Comprehensive service monitoring
+
+### Entregables:
+- [ ] Dashboard funcional con real-time metrics
+- [ ] Sentry integration completa con custom tags
+- [ ] Security audit script que detecte vulnerabilities
+- [ ] Automated alerting para critical thresholds
+- [ ] Performance baseline y regression detection
+
+---
+
+## 🔒 SECURITY BEST PRACTICES SUMMARY
+
+### Input Validation:
+```python
+# Always validate and sanitize user input
+def secure_input_validator(value):
+    # Remove dangerous characters
+    cleaned = re.sub(r'[<>"\']', '', value)
+    
+    # Check length limits
+    if len(cleaned) > 1000:
+        raise ValidationError("Input too long")
+    
+    # Check for SQL injection patterns
+    sql_patterns = ['union', 'select', 'drop', 'delete', 'insert']
+    if any(pattern in cleaned.lower() for pattern in sql_patterns):
+        raise ValidationError("Invalid input detected")
+    
+    return cleaned
+```
+
+### Authentication Security:
+```python
+# Secure authentication practices
+class SecureAuthenticationView(APIView):
+    throttle_classes = [LoginThrottle]  # Rate limiting
+    
+    def post(self, request):
+        # Log authentication attempt
+        security_logger.info("Authentication attempt", extra={
+            'ip_address': get_client_ip(request),
+            'username': request.data.get('username', ''),
+            'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+        })
+        
+        # Validate input
+        username = secure_input_validator(request.data.get('username', ''))
+        password = request.data.get('password', '')
+        
+        # Authenticate user
+        user = authenticate(username=username, password=password)
+        
+        if user:
+            # Success logging
+            security_logger.info("Authentication successful", extra={
+                'user_id': user.id,
+                'ip_address': get_client_ip(request),
+            })
+            
+            # Generate secure token
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            })
+        else:
+            # Failed attempt logging
+            security_logger.warning("Authentication failed", extra={
+                'username': username,
+                'ip_address': get_client_ip(request),
+            })
+            
+            return Response({
+                'error': 'Invalid credentials'
+            }, status=401)
+```
+
+---
+
+## 🚀 TAREA PARA MAÑANA - DÍA 47
+
+**Día 47: Production Deployment**
+Prepárate estudiando:
+- Docker multi-stage builds para Django
+- CI/CD pipelines con GitHub Actions
+- Database migrations en production
+- Zero-downtime deployment strategies
+- Infrastructure as Code (Terraform basics)
+
+### Pre-study Resources:
+- Django deployment checklist oficial
+- Docker best practices para Python apps
+- Kubernetes basics para container orchestration
+- Cloud provider documentation (AWS/GCP/Azure)
+
+---
+
+## 💪 LO QUE HAS LOGRADO HOY
+
+### Technical Skills:
+- ✅ **Advanced Logging**: Structured logging con correlation IDs
+- ✅ **Error Tracking**: Sentry integration completa con custom context
+- ✅ **Security Auditing**: Automated security scanning y validation
+- ✅ **Performance Monitoring**: Real-time metrics y alerting
+- ✅ **Production Readiness**: Comprehensive health checks y monitoring
+
+### Interview Preparation:
+- ✅ **Production Experience**: Hands-on con production-grade tools
+- ✅ **Security Awareness**: Understanding de common vulnerabilities
+- ✅ **Monitoring Strategy**: Complete observability stack knowledge
+- ✅ **Incident Response**: Structured approach para handling issues
+
+### Portfolio Addition:
+Tu monitoring dashboard y security audit system demuestran:
+- **DevOps Knowledge**: Understanding de production operations
+- **Security Mindset**: Proactive security measures
+- **Observability**: Complete application monitoring
+- **Reliability Engineering**: Production-ready applications
+
+¡Estás desarrollando exactamente las skills que buscan en roles senior! El monitoring y security son diferenciadores clave. ¡Mañana cerramos con deployment strategies! 🚀🔒📊

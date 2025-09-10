@@ -1,0 +1,410 @@
+# Dockerfile
+FROM python:3.11-slim
+
+# Establecer variables de entorno
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DJANGO_SETTINGS_MODULE=ecommerce_api.settings
+
+# Crear directorio de trabajo
+WORKDIR /app
+
+# Instalar dependencias del sistema
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        postgresql-client \
+        build-essential \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar e instalar dependencias Python
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código de la aplicación
+COPY . /app/
+
+# Crear directorio para archivos estáticos y media
+RUN mkdir -p /app/staticfiles /app/media
+
+# Crear usuario no-root para seguridad
+RUN useradd --create-home --shell /bin/bash app \
+    && chown -R app:app /app
+USER app
+
+# Exponer puerto
+EXPOSE 8000
+
+# Comando por defecto
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "ecommerce_api.wsgi:application"]
+
+# docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: ecommerce_db
+    environment:
+      POSTGRES_DB: ecommerce_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - ecommerce_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - ecommerce_network
+
+  web:
+    build: .
+    container_name: ecommerce_api
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 ecommerce_api.wsgi:application"
+    volumes:
+      - .:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=0
+      - SECRET_KEY=your-production-secret-key
+      - DB_NAME=ecommerce_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+    depends_on:
+      - db
+      - redis
+    networks:
+      - ecommerce_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: ecommerce_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    depends_on:
+      - web
+    networks:
+      - ecommerce_network
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+
+networks:
+  ecommerce_network:
+    driver: bridge
+
+# nginx.conf
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    upstream web {
+        server web:8000;
+    }
+
+    server {
+        listen 80;
+        server_name localhost;
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+
+        # Static files
+        location /static/ {
+            alias /app/staticfiles/;
+            expires 30d;
+            add_header Cache-Control "public, no-transform";
+        }
+
+        # Media files
+        location /media/ {
+            alias /app/media/;
+            expires 30d;
+            add_header Cache-Control "public, no-transform";
+        }
+
+        # API endpoints
+        location / {
+            proxy_pass http://web;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_redirect off;
+            
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # Health check endpoint
+        location /health/ {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+
+# docker-compose.dev.yml (para desarrollo)
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ecommerce_db_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=1
+      - SECRET_KEY=dev-secret-key
+      - DB_NAME=ecommerce_db_dev
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+    depends_on:
+      - db
+
+volumes:
+  postgres_dev_data:
+
+# .dockerignore
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.dev.yml
+.env
+.env.local
+.env.dev
+.env.prod
+node_modules
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.DS_Store
+
+# requirements.txt (actualizado para producción)
+Django==4.2.7
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.3.0
+django-cors-headers==4.3.1
+django-filter==23.3
+Pillow==10.0.1
+psycopg2-binary==2.9.7
+python-decouple==3.8
+gunicorn==21.2.0
+whitenoise==6.6.0
+redis==5.0.1
+celery==5.3.4
+django-redis==5.4.0
+
+# scripts/deploy.sh
+#!/bin/bash
+
+# Script de deployment automatizado
+
+set -e  # Exit on any error
+
+echo "🚀 Iniciando deployment de E-commerce API..."
+
+# Verificar que estamos en la rama correcta
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ]; then
+    echo "❌ Error: Solo se puede hacer deploy desde la rama 'main'"
+    echo "Rama actual: $BRANCH"
+    exit 1
+fi
+
+# Verificar que no hay cambios sin commitear
+if [[ -n $(git status -s) ]]; then
+    echo "❌ Error: Hay cambios sin commitear"
+    git status
+    exit 1
+fi
+
+# Ejecutar tests antes del deployment
+echo "🧪 Ejecutando tests..."
+python manage.py test --settings=ecommerce_api.settings_test
+if [ $? -ne 0 ]; then
+    echo "❌ Error: Los tests fallaron"
+    exit 1
+fi
+
+# Crear backup de la base de datos (solo en producción)
+if [ "$ENVIRONMENT" = "production" ]; then
+    echo "💾 Creando backup de la base de datos..."
+    docker-compose exec db pg_dump -U postgres ecommerce_db > "backup_$(date +%Y%m%d_%H%M%S).sql"
+fi
+
+# Construir nuevas imágenes
+echo "🏗️  Construyendo imágenes Docker..."
+docker-compose build --no-cache
+
+# Detener servicios (excepto la base de datos)
+echo "⏸️  Deteniendo servicios..."
+docker-compose stop web nginx
+
+# Ejecutar migraciones
+echo "📦 Ejecutando migraciones..."
+docker-compose run --rm web python manage.py migrate
+
+# Recolectar archivos estáticos
+echo "📁 Recolectando archivos estáticos..."
+docker-compose run --rm web python manage.py collectstatic --noinput
+
+# Reiniciar servicios
+echo "🔄 Reiniciando servicios..."
+docker-compose up -d
+
+# Verificar que los servicios estén funcionando
+echo "✅ Verificando servicios..."
+sleep 10
+
+# Health check
+if curl -f http://localhost/health/ > /dev/null 2>&1; then
+    echo "✅ Deployment exitoso! 🎉"
+    echo "🌐 La aplicación está disponible en: http://localhost"
+else
+    echo "❌ Error: La aplicación no responde"
+    echo "📋 Logs de la aplicación:"
+    docker-compose logs web --tail=50
+    exit 1
+fi
+
+# Limpiar imágenes no utilizadas
+echo "🧹 Limpiando imágenes no utilizadas..."
+docker image prune -f
+
+echo "🎯 Deployment completado exitosamente!"
+
+# Makefile para comandos frecuentes
+.PHONY: help build up down logs test migrate shell
+
+help:
+	@echo "Comandos disponibles:"
+	@echo "  build     - Construir imágenes Docker"
+	@echo "  up        - Levantar todos los servicios"
+	@echo "  down      - Detener todos los servicios"
+	@echo "  logs      - Ver logs de la aplicación"
+	@echo "  test      - Ejecutar tests"
+	@echo "  migrate   - Ejecutar migraciones"
+	@echo "  shell     - Acceder al shell de Django"
+	@echo "  setup     - Setup inicial del proyecto"
+
+build:
+	docker-compose build
+
+up:
+	docker-compose up -d
+
+down:
+	docker-compose down
+
+logs:
+	docker-compose logs -f web
+
+test:
+	docker-compose run --rm web python manage.py test
+
+migrate:
+	docker-compose run --rm web python manage.py migrate
+
+shell:
+	docker-compose run --rm web python manage.py shell
+
+setup:
+	docker-compose up -d db
+	sleep 10
+	docker-compose run --rm web python manage.py migrate
+	docker-compose run --rm web python manage.py createsuperuser
+	docker-compose up -d
+
+# Monitoring con Prometheus (docker-compose.monitoring.yml)
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - ecommerce_network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - ecommerce_network
+
+volumes:
+  grafana_data:
+
+networks:
+  ecommerce_network:
+    external: true

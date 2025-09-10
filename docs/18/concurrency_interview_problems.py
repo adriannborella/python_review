@@ -1,3 +1,138 @@
+"""
+PROBLEMAS DE ENTREVISTA - CONCURRENCIA
+======================================
+
+Estos problemas aparecen frecuentemente en entrevistas senior:
+- Web Scraping Concurrente (90% probabilidad)
+- Producer-Consumer Implementation (85% probabilidad)
+- Thread-Safe Cache (75% probabilidad)
+- Rate Limiter (70% probabilidad)
+- Parallel Processing Design (80% probabilidad)
+
+¡Dominar estos te dará una ventaja enorme sobre otros candidatos!
+"""
+
+import threading
+import time
+import queue
+import requests
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from threading import Lock, Semaphore, Event
+import multiprocessing as mp
+from multiprocessing import Queue as MPQueue, Process
+import random
+from collections import defaultdict
+import json
+
+# ========================
+# PROBLEMA 1: Web Scraping Concurrente
+# ========================
+
+class ConcurrentWebScraper:
+    """
+    Web scraper concurrente - problema MUY común en entrevistas
+    Demuestra I/O-bound optimization con threading
+    """
+    
+    def __init__(self, max_workers=5, rate_limit=1.0):
+        self.max_workers = max_workers
+        self.rate_limit = rate_limit  # segundos entre requests
+        self.session_lock = Lock()
+        self.results = []
+        self.results_lock = Lock()
+    
+    def fetch_url(self, url):
+        """
+        Fetch single URL con rate limiting
+        Simula HTTP request con delay
+        """
+        # Simular rate limiting
+        time.sleep(self.rate_limit)
+        
+        # Simular HTTP request
+        start_time = time.time()
+        
+        # Simular response time variable
+        response_time = random.uniform(0.1, 2.0)
+        time.sleep(response_time)
+        
+        # Simular response data
+        response_data = {
+            'url': url,
+            'status_code': random.choice([200, 200, 200, 404, 500]),  # Mostly 200
+            'content_length': random.randint(1000, 50000),
+            'response_time': response_time
+        }
+        
+        with self.results_lock:
+            self.results.append(response_data)
+        
+        print(f"Fetched {url}: {response_data['status_code']} ({response_time:.2f}s)")
+        return response_data
+    
+    def scrape_urls_sequential(self, urls):
+        """Scraping secuencial para comparación"""
+        print("=== SEQUENTIAL SCRAPING ===")
+        start = time.time()
+        
+        results = []
+        for url in urls:
+            result = self.fetch_url(url)
+            results.append(result)
+        
+        total_time = time.time() - start
+        print(f"Sequential scraping: {total_time:.2f}s for {len(urls)} URLs\n")
+        return results
+    
+    def scrape_urls_concurrent(self, urls):
+        """Scraping concurrente con ThreadPoolExecutor"""
+        print("=== CONCURRENT SCRAPING ===")
+        self.results.clear()
+        
+        start = time.time()
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_url = {executor.submit(self.fetch_url, url): url for url in urls}
+            
+            concurrent_results = []
+            for future in as_completed(future_to_url):
+                url = future_to_url[future]
+                try:
+                    result = future.result()
+                    concurrent_results.append(result)
+                except Exception as e:
+                    print(f"Error fetching {url}: {e}")
+        
+        total_time = time.time() - start
+        print(f"Concurrent scraping: {total_time:.2f}s for {len(urls)} URLs")
+        
+        # Análisis de resultados
+        successful = sum(1 for r in concurrent_results if r['status_code'] == 200)
+        avg_response_time = sum(r['response_time'] for r in concurrent_results) / len(concurrent_results)
+        
+        print(f"Success rate: {successful}/{len(urls)} ({successful/len(urls)*100:.1f}%)")
+        print(f"Average response time: {avg_response_time:.2f}s\n")
+        
+        return concurrent_results
+
+# ========================
+# PROBLEMA 2: Thread-Safe LRU Cache
+# ========================
+
+class ThreadSafeLRUCache:
+    """
+    LRU Cache thread-safe - combinación de patterns
+    Muy común en entrevistas de sistemas distribuidos
+    """
+    
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.cache = {}
+        self.access_order = []  # Track access order
+        self.lock = threading.RLock()
+        self.hit_count = 0
+        self.miss_count = 0
+    
     def get(self, key):
         """Get con thread safety"""
         with self.lock:

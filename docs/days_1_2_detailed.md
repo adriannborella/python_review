@@ -40,7 +40,7 @@ if 5 in lista:        # O(n) - búsqueda lineal
     print("Found")
 
 # Ordenamiento
-lista.sort()          # O(n log n) - in-place
+lista.sort()          # O(n log n) - in-place timSort
 sorted_lista = sorted(lista)  # O(n log n) - nueva lista
 ```
 
