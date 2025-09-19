@@ -46,7 +46,7 @@ from .models import Book
 books = Book.objects.all()
 for book in books:
     # A new query is made here for each book
-    print(f"'{book.title}' by {book.author.name}")
+    print(f"'{book.title}' by {book.author.name}") # Una consulta extra por aca author de cada libro
 
 # With select_related (1 query)
 books = Book.objects.select_related('author').all()

@@ -1,0 +1,20 @@
+# Requirements for Photo Organizer
+# No external dependencies required for the basic functionality
+# All modules used are part of Python standard library:
+# - pathlib
+# - datetime 
+# - typing
+# - abc
+# - shutil
+# - logging
+# - unittest (for testing)
+
+# Optional: For EXIF data extraction (advanced date extraction)
+# Pillow==10.0.1
+# exifread==3.0.0
+
+# Optional: For advanced logging
+# coloredlogs==15.0.1
+
+# Optional: For configuration management
+# python-dotenv==1.0.0

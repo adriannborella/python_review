@@ -593,7 +593,7 @@ def managed_resources(*resources):
             acquired_resources.append(acquired)
         
         yield acquired_resources
-        
+            
     finally:
         # Release in reverse order
         for resource in reversed(acquired_resources):

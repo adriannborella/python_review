@@ -378,7 +378,7 @@ def timing_decorator(func):
         return result
     return wrapper
 
-def memoize(func):
+def memorize(func):
     """Cache de resultados para optimización"""
     cache = {}
     @functools.wraps(func)
@@ -447,6 +447,7 @@ def compose(*functions):
 
 # Ejemplo: compose(str.upper, str.strip, lambda x: x.replace(' ', '_'))
 ```
+
 
 ---
 
